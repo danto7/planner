@@ -133,7 +133,10 @@ pub fn shortcuts(ctx: &Context, open: &mut bool) {
         return;
     }
     let mut close = false;
-    type Group = (&'static str, &'static [(&'static str, &'static [&'static str])]);
+    type Group = (
+        &'static str,
+        &'static [(&'static str, &'static [&'static str])],
+    );
     let groups: [Group; 3] = [
         (
             "General",

@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use reqwest::blocking::{Client as Http, Response};
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, ETAG, LOCATION};
 use reqwest::{Method, StatusCode};
+use std::collections::HashSet;
 use std::time::Duration;
 use url::Url;
 
@@ -272,20 +273,33 @@ impl Client {
         let plain = format!(
             r#"<?xml version="1.0" encoding="utf-8"?><C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><D:getetag/><C:calendar-data/></D:prop><C:filter><C:comp-filter name="VCALENDAR"><C:comp-filter name="VEVENT"><C:time-range start="{s}" end="{e}"/></C:comp-filter></C:comp-filter></C:filter></C:calendar-query>"#
         );
-        let resources = match self.report(&calendar.url, &expanded) {
-            Ok(r) => r,
+        // Expanded instances lose the DATE value type (they come back as UTC
+        // date-times), so the unexpanded masters are fetched too and used to
+        // tell which events are all-day.
+        let (resources, all_day_uids) = match self.report(&calendar.url, &expanded) {
+            Ok(r) => {
+                let masters = self.report(&calendar.url, &plain).unwrap_or_default();
+                (r, all_day_uids(&masters))
+            }
             Err(e) => {
                 log::warn!(
                     "expanded report on {} failed ({e:#}); retrying without expand",
                     calendar.url
                 );
-                self.report(&calendar.url, &plain)?
+                (self.report(&calendar.url, &plain)?, HashSet::new())
             }
         };
         let mut events = Vec::new();
         for res in resources {
             match Event::from_ics(&res.href, &calendar.url, &res.data) {
-                Ok(mut evs) => events.append(&mut evs),
+                Ok(mut evs) => {
+                    for ev in &mut evs {
+                        if all_day_uids.contains(&ev.uid) {
+                            ev.force_all_day();
+                        }
+                    }
+                    events.append(&mut evs);
+                }
                 Err(e) => log::warn!("skipping {}: {e:#}", res.href),
             }
         }
@@ -359,6 +373,31 @@ fn check_status(status: StatusCode, method: &str, url: &str, body: &str) -> Resu
     };
     let snippet: String = body.chars().take(200).collect();
     Err(anyhow!("{method} {url}: HTTP {status}{hint} {snippet}"))
+}
+
+/// UIDs of VEVENTs whose master DTSTART is a DATE (all-day) value.
+fn all_day_uids(masters: &[Resource]) -> HashSet<String> {
+    let mut uids = HashSet::new();
+    for res in masters {
+        let Ok(comps) = crate::ical::parse(&res.data) else {
+            continue;
+        };
+        for cal in comps.iter().filter(|c| c.name == "VCALENDAR") {
+            for ev in cal.children_named("VEVENT") {
+                let is_date = ev
+                    .get("DTSTART")
+                    .and_then(crate::ical::parse_time)
+                    .map(|t| matches!(t, crate::ical::TimeValue::Date(_)))
+                    .unwrap_or(false);
+                if is_date {
+                    if let Some(uid) = ev.get_text("UID") {
+                        uids.insert(uid);
+                    }
+                }
+            }
+        }
+    }
+    uids
 }
 
 pub fn with_trailing_slash(s: &str) -> String {
