@@ -24,7 +24,9 @@ pub fn drag_item(
             .scope_builder(UiBuilder::new().layer_id(layer_id), content)
             .response;
         if let Some(pointer) = ui.ctx().pointer_interact_pos() {
-            let delta = pointer - response.rect.center();
+            // Anchor the top centre of the dragged item to the pointer so the pointer
+            // marks where the task will start when dropped.
+            let delta = pointer - response.rect.center_top() + egui::vec2(0.0, 2.0);
             ui.ctx().transform_layer_shapes(
                 layer_id,
                 egui::emath::TSTransform::from_translation(delta),
