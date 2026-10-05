@@ -107,13 +107,37 @@ cargo test                          # unit tests (iCalendar, CalDAV XML, model)
 cargo clippy
 ```
 
-There is also an end-to-end test that talks to a real server. With a local
-[Radicale](https://radicale.org) on port 5232:
+### Testing against a real CalDAV server
+
+`tests/stalwart.rs` spawns a throwaway [Stalwart Mail Server](https://stalw.art)
+on a free port, provisions it through its JMAP API (bootstrap, one HTTP
+listener, a user account) and drives the app's CalDAV client against it:
+discovery from a bare URL, task create/update/delete with etag checks, day and
+time-slot scheduling, preservation of foreign properties, and event fetching
+with server-side recurrence expansion. Fetch the server binary once:
+
+```sh
+scripts/fetch-stalwart.sh      # downloads v0.16.25 into target/stalwart/
+cargo test --test stalwart
+```
+
+The test looks for the binary in `STALWART_BIN`, then `target/stalwart/stalwart`,
+then `PATH`. If none is found it prints a notice and passes; set
+`PLANNER_REQUIRE_STALWART=1` (as CI does) to make that a failure instead. The
+server runs with its own temporary data directory and is killed when the test
+ends; its log is printed if an assertion fails. Provisioning takes a few
+seconds, so all scenarios share one server inside a single test.
+
+The same client can also be pointed at any other server with the ignored
+round-trip test, for example a local [Radicale](https://radicale.org):
 
 ```sh
 PLANNER_TEST_SERVER=http://127.0.0.1:5232/ PLANNER_TEST_USER=demo \
 PLANNER_TEST_PASSWORD=x cargo test -- --ignored
 ```
+
+`.github/workflows/ci.yml` runs formatting, clippy and all tests, including
+the Stalwart suite, on every push and pull request.
 
 For UI work in a headless environment, the `screenshot` feature saves a PNG
 after a delay and exits:
@@ -132,6 +156,7 @@ PLANNER_SCREENSHOT=out.png PLANNER_SCREENSHOT_AFTER_MS=3000 \
 
 | Path | Purpose |
 | --- | --- |
+| `src/lib.rs` | Library root; `src/main.rs` is a thin binary around it |
 | `src/ical.rs` | Round-trip-safe iCalendar parser and writer |
 | `src/model.rs` | `Task`, `Event`, `Calendar` and their mapping to VTODO/VEVENT |
 | `src/caldav.rs` | HTTP client: discovery, `calendar-query` reports, PUT/DELETE |
@@ -141,3 +166,6 @@ PLANNER_SCREENSHOT=out.png PLANNER_SCREENSHOT_AFTER_MS=3000 \
 | `src/ui/dialogs.rs` | Modal dialog scaffold, About and Keyboard Shortcuts |
 | `src/ui/` | Inbox sidebar, week grid, task editor, preferences |
 | `assets/fonts/` | Inter Regular and SemiBold (SIL Open Font License) |
+| `tests/common/mod.rs` | Spawns and provisions a Stalwart server for tests |
+| `tests/stalwart.rs` | End-to-end CalDAV scenarios against that server |
+| `scripts/fetch-stalwart.sh` | Downloads the pinned Stalwart release |

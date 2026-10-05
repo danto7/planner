@@ -304,6 +304,24 @@ impl Event {
         Ok(events)
     }
 
+    /// Reinterpret an expanded instance of an all-day event. Servers that
+    /// expand recurrences (RFC 4791 §9.6.5) return every instance as a UTC
+    /// DATE-TIME, so an all-day event comes back as midnight UTC; the
+    /// original dates are recovered from the UTC calendar day.
+    pub fn force_all_day(&mut self) {
+        if self.all_day {
+            return;
+        }
+        let start = self.start.with_timezone(&Utc).date_naive();
+        let mut end = self.end.with_timezone(&Utc).date_naive();
+        if end <= start {
+            end = start + Duration::days(1);
+        }
+        self.all_day = true;
+        self.start = local_midnight(start);
+        self.end = local_midnight(end);
+    }
+
     pub fn covers_day(&self, day: NaiveDate) -> bool {
         let day_start = local_midnight(day);
         let day_end = local_midnight(day + Duration::days(1));
@@ -357,6 +375,18 @@ mod tests {
         assert!(out.contains("X-FOO-BAR;X-P=1:keep me"));
         assert!(out.contains("SUMMARY:New"));
         assert!(!out.contains("DUE"));
+    }
+
+    #[test]
+    fn expanded_all_day_instance_is_restored() {
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:c\r\nSUMMARY:Conference\r\nDTSTART:20261008T000000Z\r\nDTEND:20261010T000000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let mut ev = Event::from_ics("x", "c", ics).unwrap().remove(0);
+        assert!(!ev.all_day);
+        ev.force_all_day();
+        assert!(ev.all_day);
+        assert!(ev.covers_day(NaiveDate::from_ymd_opt(2026, 10, 8).unwrap()));
+        assert!(ev.covers_day(NaiveDate::from_ymd_opt(2026, 10, 9).unwrap()));
+        assert!(!ev.covers_day(NaiveDate::from_ymd_opt(2026, 10, 10).unwrap()));
     }
 
     #[test]
