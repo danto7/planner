@@ -47,6 +47,22 @@ cargo run --release
 On Linux you need the usual GUI libraries (X11 or Wayland, OpenGL,
 `libxkbcommon`). No cmake or system TLS library is required.
 
+### NixOS / Nix
+
+The repository ships a flake. winit loads the Wayland, X11 and OpenGL
+libraries with `dlopen` at runtime, so on NixOS a plain `cargo run` fails
+with `WaylandError(Connection(NoWaylandLib))`. The dev shell puts those
+libraries on `LD_LIBRARY_PATH` and provides the Rust toolchain:
+
+```sh
+nix develop        # then: cargo run --release
+nix run            # build and run the packaged binary
+nix build          # result/bin/planner
+```
+
+With [direnv](https://direnv.net/), `echo 'use flake' > .envrc && direnv allow`
+enters the shell automatically.
+
 On first start the Preferences dialog asks for your server URL, username and
 password. Any of these work as the URL: the bare host, the `/.well-known/caldav`
 path, your principal URL or the calendar home; the app discovers the rest. Use
