@@ -38,6 +38,7 @@ pub enum Action {
     },
     Delete(String),
     SaveSettings(Config),
+    SelectTaskList(String),
 }
 
 /// An in-app notification shown at the bottom of the window.
@@ -55,7 +56,6 @@ pub struct PlannerApp {
     pub events: Vec<Event>,
     pub week_start: NaiveDate,
     pub new_task: String,
-    pub new_task_calendar: String,
     pub focus_new_task: bool,
     pub editor: Option<TaskEditor>,
     pub busy: bool,
@@ -82,7 +82,6 @@ impl PlannerApp {
         let sync = sync::spawn(cc.egui_ctx.clone());
         let mut app = Self {
             week_start: monday_of(Local::now().date_naive()),
-            new_task_calendar: config.default_task_calendar.clone(),
             config,
             settings: SettingsState::default(),
             calendars: Vec::new(),
@@ -122,6 +121,7 @@ impl PlannerApp {
         self.sync.send(Command::Configure(self.config.clone()));
         self.sync.send(Command::Refresh {
             week_start: self.week_start,
+            task_list: self.config.task_list.clone(),
         });
         self.last_refresh = Instant::now();
     }
@@ -129,6 +129,7 @@ impl PlannerApp {
     fn refresh(&mut self) {
         self.sync.send(Command::Refresh {
             week_start: self.week_start,
+            task_list: self.config.task_list.clone(),
         });
         self.last_refresh = Instant::now();
     }
@@ -138,6 +139,36 @@ impl PlannerApp {
             self.week_start = start;
             self.refresh();
         }
+    }
+
+    /// Every discovered calendar that can hold tasks.
+    pub fn task_lists(&self) -> Vec<Calendar> {
+        self.calendars
+            .iter()
+            .filter(|c| c.supports_todo)
+            .cloned()
+            .collect()
+    }
+
+    /// The list currently shown: the configured one, else the first available.
+    pub fn task_list(&self) -> Option<Calendar> {
+        let lists = self.task_lists();
+        lists
+            .iter()
+            .find(|c| c.url == self.config.task_list)
+            .or_else(|| lists.first())
+            .cloned()
+    }
+
+    fn select_task_list(&mut self, url: String) {
+        if self.config.task_list == url && self.tasks.iter().all(|t| t.calendar == url) {
+            return;
+        }
+        self.config.task_list = url.clone();
+        let _ = self.config.save();
+        self.tasks.retain(|t| t.calendar == url);
+        self.editor = None;
+        self.refresh();
     }
 
     fn task_mut(&mut self, uid: &str) -> Option<&mut Task> {
@@ -159,23 +190,18 @@ impl PlannerApp {
                     self.connected = true;
                     self.toast = None;
                     self.calendars = cals;
-                    let valid = |url: &str| {
-                        self.calendars.iter().any(|c| {
-                            c.url == url
-                                && c.supports_todo
-                                && self.config.uses_task_calendar(&c.url)
-                        })
-                    };
-                    if !valid(&self.new_task_calendar) {
-                        self.new_task_calendar = if valid(&self.config.default_task_calendar) {
-                            self.config.default_task_calendar.clone()
-                        } else {
-                            self.calendars
-                                .iter()
-                                .find(|c| c.supports_todo && self.config.uses_task_calendar(&c.url))
-                                .map(|c| c.url.clone())
-                                .unwrap_or_default()
-                        };
+                    // The configured list may be stale; fall back to the first task list.
+                    let configured = self.config.task_list.clone();
+                    let valid = self.task_lists().iter().any(|c| c.url == configured);
+                    if !valid {
+                        let first = self.task_lists().first().map(|c| c.url.clone());
+                        if let Some(url) = first {
+                            self.config.task_list = url;
+                            let _ = self.config.save();
+                            if !configured.is_empty() {
+                                self.refresh();
+                            }
+                        }
                     }
                 }
                 Message::Tasks(fresh) => {
@@ -230,10 +256,13 @@ impl PlannerApp {
             match action {
                 Action::Create { summary } => {
                     let summary = summary.trim().to_string();
-                    if summary.is_empty() || self.new_task_calendar.is_empty() {
+                    let Some(list) = self.task_list() else {
+                        continue;
+                    };
+                    if summary.is_empty() {
                         continue;
                     }
-                    let task = Task::new(&self.new_task_calendar, &summary);
+                    let task = Task::new(&list.url, &summary);
                     let uid = task.uid.clone();
                     self.tasks.push(task);
                     self.save(&uid);
@@ -289,9 +318,9 @@ impl PlannerApp {
                     let reconnect = cfg.server_url != self.config.server_url
                         || cfg.username != self.config.username
                         || cfg.password != self.config.password
-                        || cfg.task_calendars != self.config.task_calendars
                         || cfg.event_calendars != self.config.event_calendars
                         || !self.connected;
+                    let list_changed = cfg.task_list != self.config.task_list;
                     if let Err(e) = cfg.save() {
                         self.toast = Some(Toast {
                             text: "Could not save preferences".into(),
@@ -300,11 +329,14 @@ impl PlannerApp {
                         });
                     }
                     self.config = cfg;
-                    self.new_task_calendar = self.config.default_task_calendar.clone();
                     if reconnect && self.config.is_configured() {
                         self.connect();
+                    } else if list_changed {
+                        let url = self.config.task_list.clone();
+                        self.select_task_list(url);
                     }
                 }
+                Action::SelectTaskList(url) => self.select_task_list(url),
             }
         }
     }

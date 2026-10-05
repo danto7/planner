@@ -15,8 +15,11 @@ theme follows the system; set `PLANNER_THEME=light` or `dark` to force one.
 
 - **Week grid** – seven days with an all-day row and hourly slots. Calendar
   events (VEVENT) are drawn read-only so you can plan around them.
-- **Inbox** – every task (VTODO) without a date, plus anything overdue. Type a
-  task and press Enter to capture it while you look at the week.
+- **One list at a time** – the sidebar shows a single task list (a CalDAV
+  calendar that holds VTODOs). Its unscheduled tasks form the inbox, with
+  anything overdue above them. Type a task and press Enter to capture it into
+  that list. Accounts with several lists get a dropdown in the sidebar title
+  to switch; the choice is remembered.
 - **Drag and drop** – drag a task from the inbox onto a day (all-day) or onto a
   time slot (snaps to 15 minutes). Drag it back to the inbox to unschedule.
 - **Edit** – click any task to change its summary, notes, date, time, length,
@@ -79,8 +82,7 @@ different file.
 server_url = "https://cloud.example.com/remote.php/dav"
 username = "me"
 password = "app-password"
-default_task_calendar = ""   # calendar URL for new tasks; empty = first task calendar
-task_calendars = []          # calendar URLs to load tasks from; empty = all
+task_list = ""               # URL of the task list to show; empty = first task calendar
 event_calendars = []         # calendar URLs to load events from; empty = all
 day_start_hour = 7
 day_end_hour = 21

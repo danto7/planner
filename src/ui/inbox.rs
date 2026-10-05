@@ -18,7 +18,7 @@ pub fn show(app: &mut PlannerApp, ui: &mut Ui) {
             bottom: 6,
         })
         .show(ui, |ui| {
-            ui.label(RichText::new("Inbox").font(theme::title_font(17.0)));
+            list_picker(app, ui);
             ui.add_space(8.0);
             capture_box(app, ui);
         });
@@ -103,14 +103,38 @@ fn prio_key(p: u8) -> u8 {
     }
 }
 
+/// Sidebar title: the name of the task list being shown, as a dropdown when
+/// the account has several lists.
+fn list_picker(app: &mut PlannerApp, ui: &mut Ui) {
+    let lists = app.task_lists();
+    let current = app.task_list();
+    let title = current
+        .as_ref()
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| "Inbox".to_string());
+    if lists.len() <= 1 {
+        ui.label(RichText::new(title).font(theme::title_font(17.0)));
+        return;
+    }
+    let mut selected = current.map(|c| c.url).unwrap_or_default();
+    let response = egui::ComboBox::from_id_salt("task-list")
+        .selected_text(RichText::new(title).font(theme::title_font(17.0)))
+        .width(ui.available_width())
+        .show_ui(ui, |ui| {
+            for c in &lists {
+                ui.selectable_value(&mut selected, c.url.clone(), &c.name);
+            }
+        });
+    response
+        .response
+        .on_hover_text("Choose which task list to plan");
+    if selected != app.config.task_list && lists.iter().any(|c| c.url == selected) {
+        app.queue(Action::SelectTaskList(selected));
+    }
+}
+
 fn capture_box(app: &mut PlannerApp, ui: &mut Ui) {
-    let calendars: Vec<_> = app
-        .calendars
-        .iter()
-        .filter(|c| c.supports_todo && app.config.uses_task_calendar(&c.url))
-        .cloned()
-        .collect();
-    let can_add = !calendars.is_empty();
+    let can_add = app.task_list().is_some();
 
     let mut submitted = false;
     ui.horizontal(|ui| {
@@ -141,24 +165,6 @@ fn capture_box(app: &mut PlannerApp, ui: &mut Ui) {
             response.request_focus();
         }
     });
-    if calendars.len() > 1 {
-        ui.horizontal(|ui| {
-            let p = palette(ui);
-            ui.label(RichText::new("Add to").color(p.dim_fg).size(12.0));
-            let selected_name = calendars
-                .iter()
-                .find(|c| c.url == app.new_task_calendar)
-                .map(|c| c.name.clone())
-                .unwrap_or_else(|| "Calendar".into());
-            egui::ComboBox::from_id_salt("new_task_calendar")
-                .selected_text(RichText::new(selected_name).size(12.0))
-                .show_ui(ui, |ui| {
-                    for c in &calendars {
-                        ui.selectable_value(&mut app.new_task_calendar, c.url.clone(), &c.name);
-                    }
-                });
-        });
-    }
 }
 
 fn boxed_task_list(app: &mut PlannerApp, ui: &mut Ui, tasks: &[Task], show_date: bool) {

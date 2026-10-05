@@ -11,9 +11,11 @@ use std::thread;
 pub enum Command {
     /// (Re)connect with this configuration and discover calendars.
     Configure(Config),
-    /// Reload tasks and the events around the given week.
+    /// Reload the tasks of one list and the events around the given week.
     Refresh {
         week_start: NaiveDate,
+        /// URL of the task list; empty = the first calendar supporting VTODO.
+        task_list: String,
     },
     Save(Task),
     Delete(Task),
@@ -97,7 +99,10 @@ impl Worker {
             self.send(Message::Busy(true));
             let result = match cmd {
                 Command::Configure(cfg) => self.configure(cfg),
-                Command::Refresh { week_start } => self.refresh(week_start),
+                Command::Refresh {
+                    week_start,
+                    task_list,
+                } => self.refresh(week_start, &task_list),
                 Command::Save(task) => self.save(task),
                 Command::Delete(task) => self.delete(task),
             };
@@ -127,15 +132,16 @@ impl Worker {
         }
     }
 
-    fn refresh(&mut self, week_start: NaiveDate) -> Result<()> {
+    fn refresh(&mut self, week_start: NaiveDate, task_list: &str) -> Result<()> {
         let (client, cfg) = self.client()?;
         let mut tasks = Vec::new();
         let mut errors = Vec::new();
-        for cal in self
+        let list = self
             .calendars
             .iter()
-            .filter(|c| c.supports_todo && cfg.uses_task_calendar(&c.url))
-        {
+            .find(|c| c.supports_todo && c.url == task_list)
+            .or_else(|| self.calendars.iter().find(|c| c.supports_todo));
+        if let Some(cal) = list {
             match client.fetch_tasks(cal) {
                 Ok(mut t) => tasks.append(&mut t),
                 Err(e) => errors.push(format!("{}: {e:#}", cal.name)),

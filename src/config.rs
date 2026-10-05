@@ -12,10 +12,10 @@ pub struct Config {
     pub server_url: String,
     pub username: String,
     pub password: String,
-    /// Calendar URL that new tasks are created in. Empty = first task calendar found.
-    pub default_task_calendar: String,
-    /// Calendars to load tasks from. Empty = every calendar that supports VTODO.
-    pub task_calendars: Vec<String>,
+    /// URL of the task list (calendar collection) shown in the planner.
+    /// Empty = the first calendar that supports VTODO.
+    #[serde(alias = "default_task_calendar")]
+    pub task_list: String,
     /// Calendars to load events from. Empty = every calendar that supports VEVENT.
     pub event_calendars: Vec<String>,
     /// First hour shown in the week grid.
@@ -33,8 +33,7 @@ impl Default for Config {
             server_url: String::new(),
             username: String::new(),
             password: String::new(),
-            default_task_calendar: String::new(),
-            task_calendars: Vec::new(),
+            task_list: String::new(),
             event_calendars: Vec::new(),
             day_start_hour: 7,
             day_end_hour: 21,
@@ -84,10 +83,6 @@ impl Config {
 
     pub fn is_configured(&self) -> bool {
         !self.server_url.trim().is_empty()
-    }
-
-    pub fn uses_task_calendar(&self, url: &str) -> bool {
-        self.task_calendars.is_empty() || self.task_calendars.iter().any(|c| c == url)
     }
 
     pub fn uses_event_calendar(&self, url: &str) -> bool {

@@ -12,7 +12,6 @@ use std::collections::HashMap;
 pub struct SettingsState {
     pub open: bool,
     pub draft: Config,
-    pub task_enabled: HashMap<String, bool>,
     pub event_enabled: HashMap<String, bool>,
 }
 
@@ -20,11 +19,8 @@ impl SettingsState {
     pub fn open_with(&mut self, config: &Config, calendars: &[Calendar]) {
         self.open = true;
         self.draft = config.clone();
-        self.task_enabled.clear();
         self.event_enabled.clear();
         for c in calendars {
-            self.task_enabled
-                .insert(c.url.clone(), config.uses_task_calendar(&c.url));
             self.event_enabled
                 .insert(c.url.clone(), config.uses_event_calendar(&c.url));
         }
@@ -34,11 +30,6 @@ impl SettingsState {
         let mut cfg = self.draft.clone();
         cfg.server_url = cfg.server_url.trim().to_string();
         cfg.username = cfg.username.trim().to_string();
-        let todo_cals: Vec<&str> = calendars
-            .iter()
-            .filter(|c| c.supports_todo)
-            .map(|c| c.url.as_str())
-            .collect();
         let event_cals: Vec<&str> = calendars
             .iter()
             .filter(|c| c.supports_event)
@@ -57,7 +48,6 @@ impl SettingsState {
             }
         };
         if !calendars.is_empty() {
-            cfg.task_calendars = enabled(&self.task_enabled, &todo_cals);
             cfg.event_calendars = enabled(&self.event_enabled, &event_cals);
         }
         cfg.day_end_hour = cfg.day_end_hour.clamp(cfg.day_start_hour + 1, 24);
@@ -192,34 +182,30 @@ pub fn show(app: &mut PlannerApp, ctx: &Context) {
                                         if c.supports_event {
                                             let v = settings.event_enabled.entry(c.url.clone()).or_insert(true);
                                             theme::switch(ui, v);
-                                            ui.label(RichText::new("Events").color(p.dim_fg).size(12.0));
-                                            ui.add_space(8.0);
-                                        }
-                                        if c.supports_todo {
-                                            let v = settings.task_enabled.entry(c.url.clone()).or_insert(true);
-                                            theme::switch(ui, v);
-                                            ui.label(RichText::new("Tasks").color(p.dim_fg).size(12.0));
+                                            ui.label(RichText::new("Show events").color(p.dim_fg).size(12.0));
+                                        } else {
+                                            ui.label(RichText::new("Tasks only").color(p.dim_fg).size(12.0));
                                         }
                                     });
                                 });
                             });
                         }
                         let task_cals: Vec<&Calendar> = calendars.iter().filter(|c| c.supports_todo).collect();
-                        if task_cals.len() > 1 {
+                        if !task_cals.is_empty() {
                             theme::list_row(ui, false, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label("Add new tasks to");
+                                    ui.label("Task list to plan");
                                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                                         let name = task_cals
                                             .iter()
-                                            .find(|c| c.url == settings.draft.default_task_calendar)
+                                            .find(|c| c.url == settings.draft.task_list)
                                             .map(|c| c.name.clone())
-                                            .unwrap_or_else(|| "First calendar".into());
-                                        egui::ComboBox::from_id_salt("default_task_calendar")
+                                            .unwrap_or_else(|| task_cals[0].name.clone());
+                                        egui::ComboBox::from_id_salt("task_list")
                                             .selected_text(name)
                                             .show_ui(ui, |ui| {
                                                 for c in &task_cals {
-                                                    ui.selectable_value(&mut settings.draft.default_task_calendar, c.url.clone(), &c.name);
+                                                    ui.selectable_value(&mut settings.draft.task_list, c.url.clone(), &c.name);
                                                 }
                                             });
                                     });
