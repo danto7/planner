@@ -6,6 +6,13 @@ and every change is written straight back to the server.
 
 ![Week Planner showing the inbox and a week grid](docs/screenshot.png)
 
+The interface follows the [GNOME Human Interface Guidelines](https://developer.gnome.org/hig/):
+a header bar with navigation on the left and the primary menu on the right,
+a sidebar of boxed lists, dialogs with their actions in the header bar,
+preference groups with switches, toasts for errors, the Adwaita palette in
+light and dark, and the Inter typeface that Adwaita Sans is based on. The
+theme follows the system; set `PLANNER_THEME=light` or `dark` to force one.
+
 - **Week grid** – seven days with an all-day row and hourly slots. Calendar
   events (VEVENT) are drawn read-only so you can plan around them.
 - **Inbox** – every task (VTODO) without a date, plus anything overdue. Type a
@@ -21,6 +28,16 @@ and every change is written straight back to the server.
 
 Built in Rust with [egui/eframe](https://github.com/emilk/egui).
 
+| Shortcut | Action |
+| --- | --- |
+| Ctrl+N | New task |
+| Alt+← / Alt+→ | Previous / next week |
+| Ctrl+T | Go to today |
+| Ctrl+R | Refresh from server |
+| Ctrl+, | Preferences |
+| Ctrl+? | Keyboard shortcuts |
+| Ctrl+Enter / Esc | Save / close a dialog |
+
 ## Build and run
 
 ```sh
@@ -30,7 +47,7 @@ cargo run --release
 On Linux you need the usual GUI libraries (X11 or Wayland, OpenGL,
 `libxkbcommon`). No cmake or system TLS library is required.
 
-On first start the settings dialog asks for your server URL, username and
+On first start the Preferences dialog asks for your server URL, username and
 password. Any of these work as the URL: the bare host, the `/.well-known/caldav`
 path, your principal URL or the calendar home; the app discovers the rest. Use
 an app-specific password where your provider offers one.
@@ -55,7 +72,7 @@ default_task_minutes = 60
 show_completed = false
 ```
 
-The Settings dialog edits all of this, including which calendars are used
+The Preferences dialog edits all of this, including which calendars are used
 once they have been discovered.
 
 ## How tasks are stored
@@ -88,8 +105,12 @@ after a delay and exits:
 ```sh
 cargo build --features screenshot
 PLANNER_SCREENSHOT=out.png PLANNER_SCREENSHOT_AFTER_MS=3000 \
+  PLANNER_THEME=dark PLANNER_SCREENSHOT_DIALOG=preferences \
   xvfb-run -a target/debug/planner
 ```
+
+`PLANNER_SCREENSHOT_DIALOG` may be `editor`, `preferences`, `about` or
+`shortcuts`.
 
 ### Layout
 
@@ -100,4 +121,7 @@ PLANNER_SCREENSHOT=out.png PLANNER_SCREENSHOT_AFTER_MS=3000 \
 | `src/caldav.rs` | HTTP client: discovery, `calendar-query` reports, PUT/DELETE |
 | `src/sync.rs` | Background thread so the UI never blocks on the network |
 | `src/app.rs` | Application state, actions and top-level layout |
-| `src/ui/` | Inbox, week grid, task editor, settings dialog |
+| `src/ui/theme.rs` | Adwaita palette, fonts, icons, switches, boxed lists |
+| `src/ui/dialogs.rs` | Modal dialog scaffold, About and Keyboard Shortcuts |
+| `src/ui/` | Inbox sidebar, week grid, task editor, preferences |
+| `assets/fonts/` | Inter Regular and SemiBold (SIL Open Font License) |

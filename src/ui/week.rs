@@ -1,5 +1,6 @@
 //! Central panel: the seven-day grid with an all-day row and hourly slots.
 
+use super::theme::{self, palette};
 use super::widgets::{
     calendar_color, drag_item, drop_zone, find_calendar, tint, DragTask, DEFAULT_EVENT_COLOR,
     DEFAULT_TASK_COLOR,
@@ -9,8 +10,8 @@ use crate::ical::local_midnight;
 use crate::model::{Event, Task, When};
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use egui::{
-    Align2, Color32, FontId, Frame, Id, Margin, Pos2, Rect, RichText, Sense, Stroke, StrokeKind,
-    Ui, UiBuilder, Vec2,
+    Align2, FontId, Frame, Id, Margin, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui,
+    UiBuilder, Vec2,
 };
 
 pub const HOUR_HEIGHT: f32 = 56.0;
@@ -45,24 +46,36 @@ fn header(ui: &mut Ui, days: &[NaiveDate], today: NaiveDate, col_w: f32) {
         for &day in days {
             let is_today = day == today;
             ui.allocate_ui_with_layout(
-                Vec2::new(col_w, 44.0),
+                Vec2::new(col_w, 50.0),
                 egui::Layout::top_down(egui::Align::Center),
                 |ui| {
                     ui.set_width(col_w);
-                    let mut name = RichText::new(day.format("%A").to_string()).small();
-                    let mut num = RichText::new(day.format("%-d %b").to_string())
-                        .strong()
-                        .size(16.0);
+                    let pal = palette(ui);
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    let mut name = RichText::new(day.format("%a").to_string().to_uppercase())
+                        .size(11.0)
+                        .color(pal.dim_fg);
                     if is_today {
-                        let accent = ui.visuals().selection.bg_fill;
-                        name = name.color(accent);
-                        num = num.color(accent);
-                    } else if day < today {
-                        name = name.weak();
-                        num = num.weak();
+                        name = name.color(pal.accent);
                     }
                     ui.label(name);
-                    ui.label(num);
+                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+                    let color = if is_today {
+                        ui.painter()
+                            .circle_filled(rect.center(), 14.0, pal.accent_bg);
+                        pal.accent_fg
+                    } else if day < today {
+                        pal.dim_fg
+                    } else {
+                        pal.window_fg
+                    };
+                    ui.painter().text(
+                        rect.center(),
+                        Align2::CENTER_CENTER,
+                        day.format("%-d").to_string(),
+                        theme::title_font(15.0),
+                        color,
+                    );
                 },
             );
         }
@@ -120,19 +133,22 @@ fn all_day_row(
             egui::Layout::top_down(egui::Align::Max),
             |ui| {
                 ui.add_space(4.0);
-                ui.label(RichText::new("all day").small().weak());
+                let pal = palette(ui);
+                ui.label(RichText::new("All day").size(11.0).color(pal.dim_fg));
             },
         );
         for (i, &day) in days.iter().enumerate() {
+            let pal = palette(ui);
             let fill = if day == today {
-                tint(ui.visuals().selection.bg_fill, dark).gamma_multiply(0.5)
+                tint(pal.accent_bg, dark).gamma_multiply(0.4)
             } else {
-                ui.visuals().faint_bg_color
+                pal.view_bg
             };
             let frame = Frame::new()
                 .fill(fill)
+                .stroke(Stroke::new(1.0, pal.border))
                 .inner_margin(Margin::same(2))
-                .corner_radius(3);
+                .corner_radius(6);
             let dropped = ui
                 .allocate_ui_with_layout(
                     Vec2::new(col_w, row_h),
@@ -196,7 +212,7 @@ fn day_task_chip(app: &mut PlannerApp, ui: &mut Ui, task: &Task, dark: bool) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         let mut done = task.completed;
-        if ui.checkbox(&mut done, "").changed() {
+        if theme::check_button(ui, &mut done).changed() {
             app.queue(Action::SetCompleted {
                 uid: uid.clone(),
                 completed: done,
@@ -251,7 +267,7 @@ fn timed_grid(app: &mut PlannerApp, ui: &mut Ui, days: &[NaiveDate], today: Naiv
         ui.spacing_mut().item_spacing.x = GAP;
         let (gutter, _) = ui.allocate_exact_size(Vec2::new(GUTTER - GAP, total_h), Sense::hover());
         let painter = ui.painter();
-        let color = ui.visuals().weak_text_color();
+        let color = palette(ui).dim_fg;
         for h in 0..=hours {
             let y = gutter.top() + h as f32 * HOUR_HEIGHT;
             painter.text(
@@ -288,14 +304,15 @@ fn day_column(
         let painter = ui.painter_at(rect);
 
         // Background and hour lines.
+        let pal = palette(ui);
         let bg = if day == today {
-            tint(ui.visuals().selection.bg_fill, dark).gamma_multiply(0.35)
+            tint(pal.accent_bg, dark).gamma_multiply(0.3)
         } else {
-            ui.visuals().faint_bg_color
+            pal.view_bg
         };
         painter.rect_filled(rect, 0.0, bg);
-        let line = ui.visuals().widgets.noninteractive.bg_stroke.color;
-        let faint = line.gamma_multiply(0.4);
+        let line = pal.border;
+        let faint = line.gamma_multiply(0.45);
         for h in 0..=(end_h - start_h) {
             let y = rect.top() + h as f32 * HOUR_HEIGHT;
             painter.hline(rect.x_range(), y, Stroke::new(1.0, line));
@@ -378,7 +395,7 @@ fn day_column(
                 0.0,
                 accent,
             );
-            let text_color = ui.visuals().text_color();
+            let text_color = pal.window_fg;
             let mut y = r.top() + 2.0;
             if r.height() >= 34.0 {
                 painter.text(
@@ -386,7 +403,7 @@ fn day_column(
                     Align2::LEFT_TOP,
                     format!("{} – {}", ev.start.format("%H:%M"), ev.end.format("%H:%M")),
                     FontId::proportional(10.0),
-                    ui.visuals().weak_text_color(),
+                    pal.dim_fg,
                 );
                 y += 13.0;
             }
@@ -484,7 +501,7 @@ fn day_column(
                 if rect.contains(pos) {
                     let minutes = snapped_minutes(pos.y, rect.top(), start_h);
                     let y = rect.top() + (minutes as f32 / 60.0 - start_h as f32) * HOUR_HEIGHT;
-                    let accent = ui.visuals().selection.bg_fill;
+                    let accent = pal.accent_bg;
                     painter.hline(rect.x_range(), y, Stroke::new(2.0, accent));
                     painter.text(
                         Pos2::new(rect.left() + 4.0, y - 2.0),
@@ -502,7 +519,7 @@ fn day_column(
             let now = Local::now();
             let y = y_of(now);
             if y >= rect.top() && y <= rect.bottom() {
-                let red = Color32::from_rgb(230, 70, 60);
+                let red = pal.destructive_bg;
                 painter.hline(rect.x_range(), y, Stroke::new(2.0, red));
                 painter.circle_filled(Pos2::new(rect.left() + 1.0, y), 4.0, red);
             }
@@ -564,17 +581,23 @@ fn event_tooltip(resp: egui::Response, ev: &Event, app: &PlannerApp) {
     });
 }
 
-/// Week label like `Week 41 · 5 – 11 Oct 2026`.
-pub fn week_label(week_start: NaiveDate) -> String {
+/// Header-bar title and subtitle, e.g. `5 – 11 October 2026` and `Week 41`.
+pub fn week_title(week_start: NaiveDate) -> (String, String) {
     let end = week_start + Duration::days(6);
     let range = if week_start.format("%b%Y").to_string() == end.format("%b%Y").to_string() {
-        format!("{} – {}", week_start.format("%-d"), end.format("%-d %b %Y"))
-    } else {
+        format!("{} – {}", week_start.format("%-d"), end.format("%-d %B %Y"))
+    } else if week_start.format("%Y").to_string() == end.format("%Y").to_string() {
         format!(
             "{} – {}",
             week_start.format("%-d %b"),
             end.format("%-d %b %Y")
         )
+    } else {
+        format!(
+            "{} – {}",
+            week_start.format("%-d %b %Y"),
+            end.format("%-d %b %Y")
+        )
     };
-    format!("Week {} · {range}", week_start.format("%V"))
+    (range, format!("Week {}", week_start.format("%V")))
 }

@@ -1,8 +1,11 @@
-//! Connection and display settings.
+//! Preferences dialog: account, calendars and week-view groups as boxed lists.
 
+use super::dialogs::dialog;
+use super::theme::{self, palette};
 use crate::app::{Action, PlannerApp};
 use crate::config::Config;
-use egui::{Context, RichText};
+use crate::model::Calendar;
+use egui::{Context, Layout, Margin, RichText};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -11,14 +14,12 @@ pub struct SettingsState {
     pub draft: Config,
     pub task_enabled: HashMap<String, bool>,
     pub event_enabled: HashMap<String, bool>,
-    pub test_message: Option<String>,
 }
 
 impl SettingsState {
-    pub fn open_with(&mut self, config: &Config, calendars: &[crate::model::Calendar]) {
+    pub fn open_with(&mut self, config: &Config, calendars: &[Calendar]) {
         self.open = true;
         self.draft = config.clone();
-        self.test_message = None;
         self.task_enabled.clear();
         self.event_enabled.clear();
         for c in calendars {
@@ -29,7 +30,7 @@ impl SettingsState {
         }
     }
 
-    fn finish(&self, calendars: &[crate::model::Calendar]) -> Config {
+    fn finish(&self, calendars: &[Calendar]) -> Config {
         let mut cfg = self.draft.clone();
         cfg.server_url = cfg.server_url.trim().to_string();
         cfg.username = cfg.username.trim().to_string();
@@ -64,122 +65,196 @@ impl SettingsState {
     }
 }
 
+fn entry_row(
+    ui: &mut egui::Ui,
+    first: bool,
+    label: &str,
+    value: &mut String,
+    hint: &str,
+    password: bool,
+) {
+    theme::list_row(ui, first, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(value)
+                        .hint_text(hint)
+                        .password(password)
+                        .desired_width(240.0)
+                        .margin(Margin::symmetric(8, 5)),
+                );
+            });
+        });
+    });
+}
+
+fn switch_row(
+    ui: &mut egui::Ui,
+    first: bool,
+    label: &str,
+    subtitle: Option<&str>,
+    value: &mut bool,
+) -> bool {
+    let p = palette(ui);
+    theme::list_row(ui, first, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(label);
+                if let Some(s) = subtitle {
+                    ui.label(RichText::new(s).color(p.dim_fg).size(12.0));
+                }
+            });
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                theme::switch(ui, value).changed()
+            })
+            .inner
+        })
+        .inner
+    })
+    .inner
+}
+
+fn spin_row(
+    ui: &mut egui::Ui,
+    first: bool,
+    label: &str,
+    value: &mut u32,
+    range: std::ops::RangeInclusive<u32>,
+    suffix: &str,
+) {
+    theme::list_row(ui, first, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add(egui::DragValue::new(value).range(range).suffix(suffix));
+            });
+        });
+    });
+}
+
 pub fn show(app: &mut PlannerApp, ctx: &Context) {
     if !app.settings.open {
         return;
     }
-    let mut open = true;
     let mut result: Option<Config> = None;
     let mut close = false;
     let calendars = app.calendars.clone();
-    let config_path = Config::path();
     let first_run = !app.config.is_configured();
     let settings = &mut app.settings;
 
-    egui::Window::new("Settings")
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .default_width(460.0)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
-            if first_run {
-                ui.label(RichText::new("Welcome! Connect your CalDAV account to load tasks and calendars.").strong());
+    let (_, backdrop) = dialog(
+        ctx,
+        "preferences",
+        "Preferences",
+        520.0,
+        |start, end, ui| {
+            if !first_run && theme::flat_button(start, "Cancel").clicked() {
+                close = true;
+            }
+            let apply = theme::suggested_button(end, "Apply").clicked();
+            let p = palette(ui);
+            egui::ScrollArea::vertical().max_height(560.0).auto_shrink([false, true]).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if first_run {
+                    ui.label("Connect a CalDAV account to load your tasks and calendars.");
+                    ui.add_space(12.0);
+                }
+                theme::group_title(ui, "Account");
                 ui.add_space(6.0);
-            }
-            ui.heading("CalDAV server");
-            egui::Grid::new("conn").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-                ui.label("Server URL");
-                ui.add(
-                    egui::TextEdit::singleline(&mut settings.draft.server_url)
-                        .hint_text("https://cloud.example.com/remote.php/dav")
-                        .desired_width(320.0),
-                );
-                ui.end_row();
-                ui.label("Username");
-                ui.add(egui::TextEdit::singleline(&mut settings.draft.username).desired_width(320.0));
-                ui.end_row();
-                ui.label("Password");
-                ui.add(
-                    egui::TextEdit::singleline(&mut settings.draft.password)
-                        .password(true)
-                        .desired_width(320.0),
-                );
-                ui.end_row();
-            });
-            ui.weak("Nextcloud, Radicale, Baïkal, iCloud, Fastmail and other CalDAV servers work. Use an app password where your provider offers one.");
-
-            if !calendars.is_empty() {
-                ui.add_space(10.0);
-                ui.heading("Calendars");
-                egui::Grid::new("cals").num_columns(4).spacing([12.0, 4.0]).striped(true).show(ui, |ui| {
-                    ui.strong("Name");
-                    ui.strong("Tasks");
-                    ui.strong("Events");
-                    ui.strong("New tasks go here");
-                    ui.end_row();
-                    for c in &calendars {
-                        ui.horizontal(|ui| {
-                            if let Some([r, g, b]) = c.rgb() {
-                                let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                                ui.painter().circle_filled(rect.center(), 5.0, egui::Color32::from_rgb(r, g, b));
-                            }
-                            ui.label(&c.name);
-                        });
-                        if c.supports_todo {
-                            let v = settings.task_enabled.entry(c.url.clone()).or_insert(true);
-                            ui.checkbox(v, "");
-                        } else {
-                            ui.weak("–");
-                        }
-                        if c.supports_event {
-                            let v = settings.event_enabled.entry(c.url.clone()).or_insert(true);
-                            ui.checkbox(v, "");
-                        } else {
-                            ui.weak("–");
-                        }
-                        if c.supports_todo {
-                            ui.radio_value(&mut settings.draft.default_task_calendar, c.url.clone(), "");
-                        } else {
-                            ui.label("");
-                        }
-                        ui.end_row();
-                    }
+                theme::card_frame(ui).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    entry_row(ui, true, "Server", &mut settings.draft.server_url, "https://cloud.example.com/remote.php/dav", false);
+                    entry_row(ui, false, "Username", &mut settings.draft.username, "", false);
+                    entry_row(ui, false, "Password", &mut settings.draft.password, "", true);
                 });
+                ui.add_space(4.0);
+                ui.add(egui::Label::new(RichText::new(
+                    "Works with Nextcloud, Radicale, Baïkal, iCloud, Fastmail and other CalDAV servers. Use an app password where your provider offers one.",
+                ).color(p.dim_fg).size(12.0)).wrap());
+                ui.add_space(18.0);
+
+                if !calendars.is_empty() {
+                    theme::group_title(ui, "Calendars");
+                    ui.add_space(6.0);
+                    theme::card_frame(ui).show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        for (i, c) in calendars.iter().enumerate() {
+                            theme::list_row(ui, i == 0, |ui| {
+                                ui.horizontal(|ui| {
+                                    if let Some([r, g, b]) = c.rgb() {
+                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                                        ui.painter().circle_filled(rect.center(), 6.0, egui::Color32::from_rgb(r, g, b));
+                                    }
+                                    ui.label(&c.name);
+                                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if c.supports_event {
+                                            let v = settings.event_enabled.entry(c.url.clone()).or_insert(true);
+                                            theme::switch(ui, v);
+                                            ui.label(RichText::new("Events").color(p.dim_fg).size(12.0));
+                                            ui.add_space(8.0);
+                                        }
+                                        if c.supports_todo {
+                                            let v = settings.task_enabled.entry(c.url.clone()).or_insert(true);
+                                            theme::switch(ui, v);
+                                            ui.label(RichText::new("Tasks").color(p.dim_fg).size(12.0));
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                        let task_cals: Vec<&Calendar> = calendars.iter().filter(|c| c.supports_todo).collect();
+                        if task_cals.len() > 1 {
+                            theme::list_row(ui, false, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("Add new tasks to");
+                                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let name = task_cals
+                                            .iter()
+                                            .find(|c| c.url == settings.draft.default_task_calendar)
+                                            .map(|c| c.name.clone())
+                                            .unwrap_or_else(|| "First calendar".into());
+                                        egui::ComboBox::from_id_salt("default_task_calendar")
+                                            .selected_text(name)
+                                            .show_ui(ui, |ui| {
+                                                for c in &task_cals {
+                                                    ui.selectable_value(&mut settings.draft.default_task_calendar, c.url.clone(), &c.name);
+                                                }
+                                            });
+                                    });
+                                });
+                            });
+                        }
+                    });
+                    ui.add_space(18.0);
+                }
+
+                theme::group_title(ui, "Week View");
+                ui.add_space(6.0);
+                theme::card_frame(ui).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    spin_row(ui, true, "Day starts at", &mut settings.draft.day_start_hour, 0..=23, ":00");
+                    spin_row(ui, false, "Day ends at", &mut settings.draft.day_end_hour, 1..=24, ":00");
+                    let mut minutes = settings.draft.default_task_minutes.clamp(5, 480) as u32;
+                    spin_row(ui, false, "Default task length", &mut minutes, 5..=480, " min");
+                    settings.draft.default_task_minutes = minutes as i64;
+                    switch_row(ui, false, "Show completed tasks", None, &mut settings.draft.show_completed);
+                });
+                ui.add_space(8.0);
+                ui.label(RichText::new(format!("Stored in {}", Config::path().display())).color(p.dim_fg).size(12.0));
+            });
+            if apply {
+                result = Some(settings.finish(&calendars));
+                close = true;
             }
-
-            ui.add_space(10.0);
-            ui.heading("Week view");
-            ui.horizontal(|ui| {
-                ui.label("Show hours from");
-                ui.add(egui::DragValue::new(&mut settings.draft.day_start_hour).range(0..=23));
-                ui.label("to");
-                ui.add(egui::DragValue::new(&mut settings.draft.day_end_hour).range(1..=24));
-                ui.separator();
-                ui.label("Default task length");
-                ui.add(egui::DragValue::new(&mut settings.draft.default_task_minutes).range(5..=480).suffix(" min"));
-            });
-            ui.checkbox(&mut settings.draft.show_completed, "Show completed tasks");
-
-            ui.add_space(8.0);
-            ui.weak(format!("Saved to {}", config_path.display()));
-            ui.add_space(8.0);
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new("Save & connect").strong())).clicked() {
-                    result = Some(settings.finish(&calendars));
-                    close = true;
-                }
-                if !first_run && ui.button("Cancel").clicked() {
-                    close = true;
-                }
-            });
-        });
+        },
+    );
 
     if let Some(cfg) = result {
         app.queue(Action::SaveSettings(cfg));
     }
-    if close || !open {
+    if close || (backdrop && !first_run) {
         app.settings.open = false;
     }
 }

@@ -38,8 +38,8 @@ pub fn drag_item(
     }
 }
 
-pub const DEFAULT_TASK_COLOR: Color32 = Color32::from_rgb(66, 133, 244);
-pub const DEFAULT_EVENT_COLOR: Color32 = Color32::from_rgb(120, 144, 156);
+pub const DEFAULT_TASK_COLOR: Color32 = Color32::from_rgb(0x35, 0x84, 0xe4);
+pub const DEFAULT_EVENT_COLOR: Color32 = Color32::from_rgb(0x77, 0x76, 0x7b);
 
 pub fn calendar_color(cal: Option<&Calendar>, fallback: Color32) -> Color32 {
     cal.and_then(Calendar::rgb)

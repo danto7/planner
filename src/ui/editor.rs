@@ -1,10 +1,12 @@
-//! Modal task editor.
+//! Task dialog: a modal with Cancel / Save in its header bar.
 
+use super::dialogs::dialog;
+use super::theme::{self, palette};
 use crate::app::{Action, PlannerApp};
 use crate::ical::local_midnight;
 use crate::model::{Task, When};
-use chrono::{Duration, NaiveDate, NaiveTime};
-use egui::{Context, RichText};
+use chrono::{Duration, NaiveDate, NaiveTime, Timelike};
+use egui::{Context, Margin, RichText};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -30,19 +32,15 @@ pub struct TaskEditor {
 
 impl TaskEditor {
     pub fn from_task(task: &Task, default_minutes: i64) -> Self {
+        let nine = NaiveTime::from_hms_opt(9, 0, 0).unwrap();
         let (mode, date, time, duration) = match task.when {
             None => (
                 Mode::Inbox,
                 chrono::Local::now().date_naive(),
-                NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
+                nine,
                 default_minutes,
             ),
-            Some(When::Day(d)) => (
-                Mode::Day,
-                d,
-                NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
-                default_minutes,
-            ),
+            Some(When::Day(d)) => (Mode::Day, d, nine, default_minutes),
             Some(When::At { start, duration }) => (
                 Mode::Time,
                 start.date_naive(),
@@ -73,7 +71,7 @@ impl TaskEditor {
                 let date = self.parse_date()?;
                 let time = NaiveTime::parse_from_str(self.time.trim(), "%H:%M")
                     .or_else(|_| NaiveTime::parse_from_str(self.time.trim(), "%H:%M:%S"))
-                    .map_err(|_| format!("time {:?} is not HH:MM", self.time))?;
+                    .map_err(|_| format!("Time “{}” is not in HH:MM format", self.time))?;
                 let start = local_midnight(date)
                     + Duration::seconds(time.num_seconds_from_midnight() as i64);
                 Ok(Some(When::At {
@@ -86,145 +84,220 @@ impl TaskEditor {
 
     fn parse_date(&self) -> Result<NaiveDate, String> {
         NaiveDate::parse_from_str(self.date.trim(), "%Y-%m-%d")
-            .map_err(|_| format!("date {:?} is not YYYY-MM-DD", self.date))
+            .map_err(|_| format!("Date “{}” is not in YYYY-MM-DD format", self.date))
     }
 }
-
-use chrono::Timelike;
 
 pub fn show(app: &mut PlannerApp, ctx: &Context) {
     let Some(editor) = app.editor.as_mut() else {
         return;
     };
-    let mut open = true;
     let mut close = false;
     let mut action: Option<Action> = None;
+    let mut save = ctx.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
 
-    egui::Window::new("Task")
-        .id(egui::Id::new("task-editor"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .default_width(380.0)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut editor.summary)
-                    .hint_text("Summary")
-                    .font(egui::TextStyle::Heading)
-                    .desired_width(f32::INFINITY),
-            );
-            ui.add_space(4.0);
-            ui.add(
-                egui::TextEdit::multiline(&mut editor.description)
-                    .hint_text("Notes")
-                    .desired_rows(4)
-                    .desired_width(f32::INFINITY),
-            );
-            ui.add_space(8.0);
+    let (_, backdrop) = dialog(ctx, "task-editor", "Edit Task", 440.0, |start, end, ui| {
+        if theme::flat_button(start, "Cancel").clicked() {
+            close = true;
+        }
+        if theme::suggested_button(end, "Save").clicked() {
+            save = true;
+        }
+        let p = palette(ui);
+        ui.add(
+            egui::TextEdit::singleline(&mut editor.summary)
+                .hint_text("Task name")
+                .font(egui::FontId::proportional(16.0))
+                .margin(Margin::symmetric(10, 8))
+                .desired_width(f32::INFINITY),
+        );
+        ui.add_space(6.0);
+        ui.add(
+            egui::TextEdit::multiline(&mut editor.description)
+                .hint_text("Notes")
+                .desired_rows(3)
+                .margin(Margin::symmetric(10, 8))
+                .desired_width(f32::INFINITY),
+        );
+        ui.add_space(12.0);
 
-            ui.horizontal(|ui| {
-                ui.label("Plan:");
-                ui.selectable_value(&mut editor.mode, Mode::Inbox, "Inbox");
-                ui.selectable_value(&mut editor.mode, Mode::Day, "Day");
-                ui.selectable_value(&mut editor.mode, Mode::Time, "Time slot");
+        theme::group_title(ui, "Plan");
+        ui.add_space(6.0);
+        theme::card_frame(ui).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            theme::list_row(ui, true, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("When");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        toggle_group(
+                            ui,
+                            &mut editor.mode,
+                            &[
+                                (Mode::Time, "Time slot"),
+                                (Mode::Day, "Day"),
+                                (Mode::Inbox, "Inbox"),
+                            ],
+                        );
+                    });
+                });
             });
             if editor.mode != Mode::Inbox {
+                theme::list_row(ui, false, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Date");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut editor.date)
+                                    .desired_width(110.0)
+                                    .margin(Margin::symmetric(8, 5)),
+                            );
+                        });
+                    });
+                });
+            }
+            if editor.mode == Mode::Time {
+                theme::list_row(ui, false, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Time");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut editor.time)
+                                    .desired_width(64.0)
+                                    .margin(Margin::symmetric(8, 5)),
+                            );
+                        });
+                    });
+                });
+                theme::list_row(ui, false, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Duration");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut editor.duration_min)
+                                    .range(5..=720)
+                                    .speed(5)
+                                    .suffix(" min"),
+                            );
+                        });
+                    });
+                });
+            }
+            theme::list_row(ui, false, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Date");
-                    ui.add(egui::TextEdit::singleline(&mut editor.date).desired_width(100.0));
-                    if editor.mode == Mode::Time {
-                        ui.label("at");
-                        ui.add(egui::TextEdit::singleline(&mut editor.time).desired_width(56.0));
-                        ui.label("for");
-                        ui.add(
-                            egui::DragValue::new(&mut editor.duration_min)
-                                .range(5..=720)
-                                .speed(5)
-                                .suffix(" min"),
-                        );
-                    }
-                });
-            }
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label("Priority");
-                let labels = ["none", "high", "medium", "low"];
-                let values = [0u8, 1, 5, 9];
-                let current = match editor.priority {
-                    0 => 0,
-                    1..=4 => 1,
-                    5 => 2,
-                    _ => 3,
-                };
-                for (i, label) in labels.iter().enumerate() {
-                    if ui.selectable_label(current == i, *label).clicked() {
-                        editor.priority = values[i];
-                    }
-                }
-                ui.separator();
-                ui.checkbox(&mut editor.completed, "Completed");
-            });
-
-            if let Some(err) = &editor.error {
-                ui.add_space(4.0);
-                ui.colored_label(egui::Color32::from_rgb(220, 80, 60), err);
-            }
-            ui.add_space(10.0);
-            ui.separator();
-            ui.horizontal(|ui| {
-                let save = ui.add(egui::Button::new(RichText::new("Save").strong()));
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
-                if save.clicked() || enter {
-                    if editor.summary.trim().is_empty() {
-                        editor.error = Some("a task needs a summary".into());
-                    } else {
-                        match editor.when() {
-                            Ok(when) => {
-                                action = Some(Action::ApplyEditor {
-                                    editor: editor.clone(),
-                                    when,
-                                });
-                                close = true;
-                            }
-                            Err(e) => editor.error = Some(e),
+                    ui.label("Priority");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let mut level = match editor.priority {
+                            0 => 0u8,
+                            1..=4 => 1,
+                            5 => 2,
+                            _ => 3,
+                        };
+                        if toggle_group(
+                            ui,
+                            &mut level,
+                            &[(3, "Low"), (2, "Medium"), (1, "High"), (0, "None")],
+                        ) {
+                            editor.priority = [0, 1, 5, 9][level as usize];
                         }
-                    }
-                }
-                if ui.button("Cancel").clicked() {
-                    close = true;
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if editor.confirm_delete {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new("Really delete").color(egui::Color32::WHITE),
-                                )
-                                .fill(egui::Color32::from_rgb(200, 60, 50)),
-                            )
-                            .clicked()
-                        {
-                            action = Some(Action::Delete(editor.uid.clone()));
-                            close = true;
-                        }
-                        if ui.button("Keep").clicked() {
-                            editor.confirm_delete = false;
-                        }
-                    } else if ui.button("Delete…").clicked() {
-                        editor.confirm_delete = true;
-                    }
+                    });
                 });
             });
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                close = true;
-            }
+            theme::list_row(ui, false, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Completed");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        theme::switch(ui, &mut editor.completed);
+                    });
+                });
+            });
         });
 
+        if let Some(err) = &editor.error {
+            ui.add_space(8.0);
+            ui.colored_label(p.error, err);
+        }
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            if editor.confirm_delete {
+                if theme::destructive_button(ui, "Delete").clicked() {
+                    action = Some(Action::Delete(editor.uid.clone()));
+                    close = true;
+                }
+                if theme::flat_button(ui, "Keep").clicked() {
+                    editor.confirm_delete = false;
+                }
+                ui.label(
+                    RichText::new("This cannot be undone.")
+                        .color(p.dim_fg)
+                        .size(12.0),
+                );
+            } else if ui
+                .add(
+                    egui::Button::new(RichText::new("Delete Task…").color(p.destructive))
+                        .frame(false),
+                )
+                .clicked()
+            {
+                editor.confirm_delete = true;
+            }
+        });
+    });
+
+    if save {
+        if editor.summary.trim().is_empty() {
+            editor.error = Some("Enter a name for the task".into());
+        } else {
+            match editor.when() {
+                Ok(when) => {
+                    action = Some(Action::ApplyEditor {
+                        editor: editor.clone(),
+                        when,
+                    });
+                    close = true;
+                }
+                Err(e) => editor.error = Some(e),
+            }
+        }
+    }
     if let Some(a) = action {
         app.queue(a);
     }
-    if close || !open {
+    if close || backdrop {
         app.editor = None;
     }
+}
+
+/// A linked group of toggle buttons. Items are given right-to-left when the
+/// layout is right-to-left, so pass them in the order they should appear from the end.
+fn toggle_group<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    items: &[(T, &str)],
+) -> bool {
+    let p = palette(ui);
+    let mut changed = false;
+    egui::Frame::new()
+        .fill(p.button_bg)
+        .corner_radius(8.0)
+        .inner_margin(Margin::same(2))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            for (item, label) in items {
+                let selected = *value == *item;
+                let fill = if selected {
+                    p.card_bg
+                } else {
+                    egui::Color32::TRANSPARENT
+                };
+                let button = egui::Button::new(RichText::new(*label).size(13.0))
+                    .fill(fill)
+                    .corner_radius(6.0)
+                    .min_size(egui::vec2(0.0, 26.0));
+                if ui.add(button).clicked() && !selected {
+                    *value = *item;
+                    changed = true;
+                }
+            }
+        });
+    changed
 }
